@@ -26,11 +26,10 @@ import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
 import org.junit.Before;
 import org.junit.Test;
-import reactor.adapter.RxJava1Adapter;
-import reactor.adapter.RxJava2Adapter;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import rx.Observable;
+import rx.RxReactiveStreams;
 import rx.Single;
 
 import org.springframework.core.MethodParameter;
@@ -46,9 +45,8 @@ import org.springframework.http.codec.HttpMessageReader;
 import org.springframework.mock.http.server.reactive.test.MockServerHttpRequest;
 import org.springframework.mock.http.server.reactive.test.MockServerHttpResponse;
 import org.springframework.tests.TestSubscriber;
-import org.springframework.ui.ExtendedModelMap;
-import org.springframework.validation.Validator;
 import org.springframework.web.reactive.result.ResolvableMethod;
+import org.springframework.web.reactive.result.method.BindingContext;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.ServerWebInputException;
 import org.springframework.web.server.adapter.DefaultServerWebExchange;
@@ -59,7 +57,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
 import static org.springframework.core.ResolvableType.forClassWithGenerics;
 
 /**
@@ -91,7 +88,7 @@ public class HttpEntityArgumentResolverTests {
 	private HttpEntityArgumentResolver createResolver() {
 		List<HttpMessageReader<?>> readers = new ArrayList<>();
 		readers.add(new DecoderHttpMessageReader<>(new StringDecoder()));
-		return new HttpEntityArgumentResolver(readers, mock(Validator.class));
+		return new HttpEntityArgumentResolver(readers);
 	}
 
 
@@ -153,7 +150,7 @@ public class HttpEntityArgumentResolverTests {
 		ResolvableType type = httpEntityType(forClassWithGenerics(Single.class, String.class));
 		HttpEntity<Single<String>> entity = resolveValueWithEmptyBody(type);
 
-		TestSubscriber.subscribe(RxJava1Adapter.singleToMono(entity.getBody()))
+		TestSubscriber.subscribe(RxReactiveStreams.toPublisher(entity.getBody()))
 				.assertNoValues()
 				.assertError(ServerWebInputException.class);
 	}
@@ -163,7 +160,7 @@ public class HttpEntityArgumentResolverTests {
 		ResolvableType type = httpEntityType(forClassWithGenerics(io.reactivex.Single.class, String.class));
 		HttpEntity<io.reactivex.Single<String>> entity = resolveValueWithEmptyBody(type);
 
-		TestSubscriber.subscribe(RxJava2Adapter.singleToMono(entity.getBody()))
+		TestSubscriber.subscribe(entity.getBody().toFlowable())
 				.assertNoValues()
 				.assertError(ServerWebInputException.class);
 	}
@@ -173,7 +170,7 @@ public class HttpEntityArgumentResolverTests {
 		ResolvableType type = httpEntityType(forClassWithGenerics(Observable.class, String.class));
 		HttpEntity<Observable<String>> entity = resolveValueWithEmptyBody(type);
 
-		TestSubscriber.subscribe(RxJava1Adapter.observableToFlux(entity.getBody()))
+		TestSubscriber.subscribe(RxReactiveStreams.toPublisher(entity.getBody()))
 				.assertNoError()
 				.assertComplete()
 				.assertNoValues();
@@ -184,7 +181,7 @@ public class HttpEntityArgumentResolverTests {
 		ResolvableType type = httpEntityType(forClassWithGenerics(io.reactivex.Observable.class, String.class));
 		HttpEntity<io.reactivex.Observable<String>> entity = resolveValueWithEmptyBody(type);
 
-		TestSubscriber.subscribe(RxJava2Adapter.observableToFlux(entity.getBody(), BackpressureStrategy.BUFFER))
+		TestSubscriber.subscribe(entity.getBody().toFlowable(BackpressureStrategy.BUFFER))
 				.assertNoError()
 				.assertComplete()
 				.assertNoValues();
@@ -195,7 +192,7 @@ public class HttpEntityArgumentResolverTests {
 		ResolvableType type = httpEntityType(forClassWithGenerics(Flowable.class, String.class));
 		HttpEntity<Flowable<String>> entity = resolveValueWithEmptyBody(type);
 
-		TestSubscriber.subscribe(RxJava2Adapter.flowableToFlux(entity.getBody()))
+		TestSubscriber.subscribe(entity.getBody())
 				.assertNoError()
 				.assertComplete()
 				.assertNoValues();
@@ -304,7 +301,7 @@ public class HttpEntityArgumentResolverTests {
 		this.request.setBody(body);
 
 		MethodParameter param = this.testMethod.resolveParam(type);
-		Mono<Object> result = this.resolver.resolveArgument(param, new ExtendedModelMap(), this.exchange);
+		Mono<Object> result = this.resolver.resolveArgument(param, new BindingContext(), this.exchange);
 		Object value = result.block(Duration.ofSeconds(5));
 
 		assertNotNull(value);
@@ -317,7 +314,7 @@ public class HttpEntityArgumentResolverTests {
 	@SuppressWarnings("unchecked")
 	private <T> HttpEntity<T> resolveValueWithEmptyBody(ResolvableType type) {
 		MethodParameter param = this.testMethod.resolveParam(type);
-		Mono<Object> result = this.resolver.resolveArgument(param, new ExtendedModelMap(), this.exchange);
+		Mono<Object> result = this.resolver.resolveArgument(param, new BindingContext(), this.exchange);
 		HttpEntity<String> httpEntity = (HttpEntity<String>) result.block(Duration.ofSeconds(5));
 
 		assertEquals(this.request.getHeaders(), httpEntity.getHeaders());

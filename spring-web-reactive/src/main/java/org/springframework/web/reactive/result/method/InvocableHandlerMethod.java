@@ -32,12 +32,12 @@ import org.springframework.core.GenericTypeResolver;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.ui.ModelMap;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.reactive.HandlerResult;
 import org.springframework.web.server.ServerWebExchange;
-
 
 /**
  * Extension of HandlerMethod that can invoke the target method after resolving
@@ -81,18 +81,19 @@ public class InvocableHandlerMethod extends HandlerMethod {
 	/**
 	 * Invoke the method and return a Publisher for the return value.
 	 * @param exchange the current exchange
-	 * @param model the model for request handling
+	 * @param bindingContext the binding context to use
 	 * @param providedArgs optional list of argument values to check by type
 	 * (via {@code instanceof}) for resolving method arguments.
 	 * @return Publisher that produces a single HandlerResult or an error signal;
 	 * never throws an exception
 	 */
-	public Mono<HandlerResult> invokeForRequest(ServerWebExchange exchange, ModelMap model,
-			Object... providedArgs) {
+	public Mono<HandlerResult> invokeForRequest(ServerWebExchange exchange,
+			BindingContext bindingContext, Object... providedArgs) {
 
-		return resolveArguments(exchange, model, providedArgs).then(args -> {
+		return resolveArguments(exchange, bindingContext, providedArgs).then(args -> {
 			try {
 				Object value = doInvoke(args);
+				ModelMap model = bindingContext.getModel();
 				HandlerResult handlerResult = new HandlerResult(this, value, getReturnType(), model);
 				return Mono.just(handlerResult);
 			}
@@ -106,7 +107,9 @@ public class InvocableHandlerMethod extends HandlerMethod {
 		});
 	}
 
-	private Mono<Object[]> resolveArguments(ServerWebExchange exchange, ModelMap model, Object... providedArgs) {
+	private Mono<Object[]> resolveArguments(ServerWebExchange exchange,
+			BindingContext bindingContext, Object... providedArgs) {
+
 		if (ObjectUtils.isEmpty(getMethodParameters())) {
 			return NO_ARGS;
 		}
@@ -127,7 +130,7 @@ public class InvocableHandlerMethod extends HandlerMethod {
 								.findFirst()
 								.orElseThrow(() -> getArgError("No resolver for ", param, null));
 						try {
-							return resolver.resolveArgument(param, model, exchange)
+							return resolver.resolveArgument(param, bindingContext, exchange)
 									.defaultIfEmpty(NO_VALUE)
 									.doOnError(cause -> {
 										if(logger.isDebugEnabled()) {
@@ -157,22 +160,22 @@ public class InvocableHandlerMethod extends HandlerMethod {
 
 	private String getDetailedErrorMessage(String message, MethodParameter param) {
 		StringBuilder sb = new StringBuilder(message);
-		sb.append("argument [" + param.getParameterIndex() + "] ");
-		sb.append("of type [" + param.getParameterType().getName() + "] ");
-		sb.append("on method [" + getBridgedMethod().toGenericString() + "]");
+		sb.append("argument [").append(param.getParameterIndex()).append("] ");
+		sb.append("of type [").append(param.getParameterType().getName()).append("] ");
+		sb.append("on method [").append(getBridgedMethod().toGenericString()).append("]");
 		return sb.toString();
 	}
 
 	private Object doInvoke(Object[] args) throws Exception {
 		if (logger.isTraceEnabled()) {
-			String target = getBeanType().getSimpleName() + "." + getMethod().getName();
-			logger.trace("Invoking [" + target + "] method with arguments " + Arrays.toString(args));
+			logger.trace("Invoking '" + ClassUtils.getQualifiedMethodName(getMethod(), getBeanType()) +
+					"' with arguments " + Arrays.toString(args));
 		}
 		ReflectionUtils.makeAccessible(getBridgedMethod());
 		Object returnValue = getBridgedMethod().invoke(getBean(), args);
 		if (logger.isTraceEnabled()) {
-			String target = getBeanType().getSimpleName() + "." + getMethod().getName();
-			logger.trace("Method [" + target + "] returned [" + returnValue + "]");
+			logger.trace("Method [" + ClassUtils.getQualifiedMethodName(getMethod(), getBeanType()) +
+					"] returned [" + returnValue + "]");
 		}
 		return returnValue;
 	}
